@@ -1,0 +1,40 @@
+[project]
+name = "shorts-agent"
+version = "0.1.0"
+description = "Human-in-the-loop agent that turns a historical figure into a 30-second story short."
+readme = "../README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic",
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "pydantic>=2",
+    "pydantic-settings",
+    "python-dotenv",
+    "langgraph",
+    "langgraph-checkpoint-postgres",
+    "psycopg[binary,pool]",
+    "langfuse",
+    "opentelemetry-instrumentation-anthropic",
+    "google-cloud-storage",
+    "python-multipart>=0.0.32",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
