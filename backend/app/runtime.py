@@ -26,8 +26,18 @@ class ProjectRecord(BaseModel):
     status: Status
     stage: str | None = None
     error: str | None = None
+    thumbnail_key: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+def pick_thumbnail(values: dict) -> str | None:
+    """The first scene's chosen keyframe, else a character sheet."""
+    keyframes = (values.get("keyframes") or {}).get("1")
+    if keyframes:
+        return keyframes[(values.get("selected_keyframes") or {}).get("1", 0)]
+    refs = values.get("character_refs") or {}
+    return next(iter(refs.values()), None)
 
 
 class ProjectRegistry:
@@ -73,8 +83,13 @@ class ProjectRunner:
         return await self.graph.aget_state(self.config(project_id))
 
     async def create(
-        self, topic: str, voice_id: str | None, style_ref_key: str | None = None
+        self,
+        topic: str,
+        voice_id: str | None,
+        style_ref_key: str | None = None,
+        options: dict | None = None,
     ) -> ProjectRecord:
+        """`options` may carry image_model, image_quality, video_model, and caption_style."""
         now = datetime.now(UTC)
         record = ProjectRecord(
             id=uuid.uuid4().hex[:12], topic=topic, status="running", stage="research",
@@ -83,7 +98,7 @@ class ProjectRunner:
         await self.registry.save(record)
         self._launch(record.id, {
             "project_id": record.id, "topic": topic, "voice_id": voice_id,
-            "style_ref_key": style_ref_key,
+            "style_ref_key": style_ref_key, **(options or {}),
         })
         return record
 
@@ -105,6 +120,7 @@ class ProjectRunner:
             with project_trace(project_id, record.stage or "start"):
                 await self.graph.ainvoke(graph_input, self.config(project_id))
             snap = await self.snapshot(project_id)
+            record.thumbnail_key = pick_thumbnail(snap.values) or record.thumbnail_key
             if snap.interrupts:
                 record.status, record.stage = "awaiting_review", snap.interrupts[0].value["stage"]
             else:

@@ -12,6 +12,12 @@ class ProjectState(TypedDict, total=False):
     status: str
     feedback: str | None
 
+    # Per-project overrides of the server defaults.
+    image_model: str | None
+    image_quality: str | None
+    video_model: str | None
+    caption_style: dict | None
+
     fact_sheet: dict
     eligibility: dict
     angles: list[dict]

@@ -1,5 +1,5 @@
 """End-to-end graph flow with fake services: every gate, fact checks, the critic loop,
-character looks, and keyframe regeneration."""
+character looks, model choices, caption re-renders, and regeneration."""
 
 import math
 from datetime import date
@@ -12,6 +12,7 @@ from langgraph.types import Command
 from app.config import Settings
 from app.domain.models import (
     AngleOptions,
+    CaptionStyle,
     CharacterLook,
     CharacterSpec,
     CriticIssue,
@@ -141,17 +142,19 @@ class FakeClaude:
 class FakeMagnific:
     def __init__(self):
         self.image_calls: list[tuple[int, int, str]] = []  # (reference count, images, prompt)
-        self.video_calls: list[tuple[str, int]] = []  # (prompt, seconds)
+        self.image_qualities: list[str] = []
+        self.video_calls: list[tuple[str, int, str]] = []  # (prompt, seconds, model)
         self.failed_scene_four = False
 
     async def gpt_image(self, prompt, reference_images=None, count=1, quality="high"):
         self.image_calls.append((len(reference_images or []), count, prompt))
+        self.image_qualities.append(quality)
         return [PNG] * count
 
     async def image_to_video(self, model, image, content_type, prompt, seconds,
                              negative_prompt=""):
-        assert model == "kling-v3-pro" and image == PNG and content_type == "image/png"
-        self.video_calls.append((prompt, seconds))
+        assert image == PNG and content_type == "image/png"
+        self.video_calls.append((prompt, seconds, model))
         if prompt.startswith("motion 4") and not self.failed_scene_four:
             self.failed_scene_four = True
             raise MagnificError("task failed")
@@ -171,11 +174,11 @@ class FakeTTS:
 
 class FakeRenderer:
     def __init__(self):
-        self.renders: list[tuple[list, str]] = []  # (clips, output name)
+        self.renders: list[tuple[list, str, CaptionStyle | None]] = []  # (clips, output, style)
 
     async def render(self, workdir: Path, clips, narration, bgm, words, total,
-                     output="preview.mp4"):
-        self.renders.append((clips, output))
+                     output="preview.mp4", caption_style=None):
+        self.renders.append((clips, output, caption_style))
         assert (workdir / narration).exists() and (workdir / bgm).exists()
         assert all((workdir / clip.path).exists() for clip in clips)
         path = workdir / output
@@ -188,7 +191,8 @@ def setup(tmp_path):
     def make(death_year: int = 1821):
         deps = Deps(
             settings=Settings(_env_file=None, elevenlabs_voice_id="voice", keyframe_candidates=2,
-                              max_critic_rounds=2, max_fact_rewrites=2),
+                              max_critic_rounds=2, max_fact_rewrites=2,
+                              video_model="kling-v3-pro"),
             claude=FakeClaude(death_year), magnific=FakeMagnific(), tts=FakeTTS(),
             storage=LocalStorage(tmp_path), renderer=FakeRenderer(),
         )
@@ -209,11 +213,12 @@ def keyframe_call(calls, prompt_ending: str):
 
 async def test_full_flow_through_every_gate(setup):
     graph, deps = setup()
-    claude, magnific = deps.claude, deps.magnific
+    claude, magnific, renderer = deps.claude, deps.magnific, deps.renderer
     await deps.storage.put("uploads/style.png", PNG, "image/png")
-    snap, pending = await step(
-        graph, {"project_id": "p1", "topic": "Napoleon", "style_ref_key": "uploads/style.png"}
-    )
+    snap, pending = await step(graph, {
+        "project_id": "p1", "topic": "Napoleon", "style_ref_key": "uploads/style.png",
+        "image_quality": "medium",
+    })
     assert pending["stage"] == "research" and pending["payload"]["eligibility"]["ok"]
     statuses = {f["id"]: f["status"] for f in pending["payload"]["fact_sheet"]["facts"]}
     assert statuses == {"F1": "disputed", "F2": "verified", "F3": "disputed"}
@@ -262,30 +267,42 @@ async def test_full_flow_through_every_gate(setup):
     decision = {"action": "approve", "edits": edit, "feedback": "moody light"}
     snap, pending = await step(graph, Command(resume=decision))
     assert pending["stage"] == "keyframes"
+    assert pending["payload"]["image_quality"] == "medium"
     assert snap.values["scenes"][0]["image_prompt"] == "edited"
     assert snap.values["scenes"][0]["narration"] == SEGMENTS[0][1]
     assert all(len(v) == 2 for v in snap.values["keyframes"].values())
     keyframe_calls = magnific.image_calls[2:]
     assert len(keyframe_calls) == len(SEGMENTS)
+    assert set(magnific.image_qualities) == {"medium"}  # the project's quality, not the default
     # Character scenes send the matching look plus the style image; others send style only.
     for ending, expected_refs in [("edited", 2), ("scene 2", 1), ("scene 4", 1), ("scene 5", 2)]:
         note = f"{ending}\nProducer note: moody light"
         n_refs, count, _ = keyframe_call(keyframe_calls, note)
         assert (n_refs, count) == (expected_refs, 2), ending
 
-    snap, pending = await step(
-        graph, Command(resume={"action": "regenerate", "scene_orders": [2], "feedback": "darker"})
-    )
+    decision = {"action": "regenerate", "scene_orders": [2], "feedback": "darker",
+                "edits": {"image_quality": "high"}}
+    snap, pending = await step(graph, Command(resume=decision))
     assert pending["stage"] == "keyframes"
     assert len(snap.values["keyframes"]["2"]) == 4 and snap.values["selected_keyframes"]["2"] == 2
+    assert magnific.image_qualities[-1] == "high"
 
     decision = {"action": "approve", "edits": {"selections": {"3": 1}}}
     snap, pending = await step(graph, Command(resume=decision))
     assert pending["stage"] == "preview"
+    assert pending["payload"]["caption_style"] == CaptionStyle().model_dump()
     assert await deps.storage.exists(snap.values["preview_key"])
-    animatic, output = deps.renderer.renders[0]
-    assert output == "preview.mp4" and len(animatic) == len(SEGMENTS)
+    animatic, output, style = renderer.renders[0]
+    assert output == "preview.mp4" and style == CaptionStyle() and len(animatic) == len(SEGMENTS)
     assert animatic[2].path == "scene_03.png" and animatic[2].kind == "image"
+
+    # Caption changes only re-render the animatic; no image is generated.
+    images_before = len(magnific.image_calls)
+    decision = {"action": "revise", "edits": {"caption_style": {"font": "cinzel", "size": 100}}}
+    snap, pending = await step(graph, Command(resume=decision))
+    assert pending["stage"] == "preview" and len(renderer.renders) == 2
+    assert renderer.renders[-1][2] == CaptionStyle(font="cinzel", size=100)
+    assert len(magnific.image_calls) == images_before
 
     # Animatic approved with direction for the motion writer.
     decision = {"action": "approve", "feedback": "gentle motion"}
@@ -301,11 +318,13 @@ async def test_full_flow_through_every_gate(setup):
         "model": "kling-v3-pro", "clips": len(SEGMENTS), "total_seconds": sum(expected),
     }
 
+    # The reviewer switches the video model right before paying for clips.
     edit = {"shots": [{"order": 1, "video_prompt": "custom motion", "clip_seconds": 6,
-                       "narration": "ignored"}]}
+                       "narration": "ignored"}], "video_model": "kling-v3-turbo"}
     snap, pending = await step(graph, Command(resume={"action": "approve", "edits": edit}))
-    assert pending["stage"] == "clips"
-    assert ("custom motion", 6) in magnific.video_calls
+    assert pending["stage"] == "clips" and pending["payload"]["video_model"] == "kling-v3-turbo"
+    assert ("custom motion", 6, "kling-v3-turbo") in magnific.video_calls
+    assert {model for _, _, model in magnific.video_calls} == {"kling-v3-turbo"}
     # Scene 4 failed; the other clips were kept and the reviewer sees the error.
     assert set(snap.values["clips"]) == {"1", "2", "3", "5"}
     assert set(pending["payload"]["errors"]) == {"4"}
@@ -320,12 +339,23 @@ async def test_full_flow_through_every_gate(setup):
 
     decision = {"action": "approve", "edits": {"selections": {"2": 0}}}
     snap, pending = await step(graph, Command(resume=decision))
-    assert pending is None and snap.values["status"] == "final_ready"
+    assert pending["stage"] == "final" and snap.values["status"] == "final_ready"
     assert await deps.storage.exists(snap.values["final_key"])
-    final_cut, output = deps.renderer.renders[-1]
-    assert output == "final.mp4"
+    final_cut, output, style = renderer.renders[-1]
+    assert output == "final.mp4" and style == CaptionStyle(font="cinzel", size=100)
     assert all(clip.kind == "video" and clip.path.endswith(".mp4") for clip in final_cut)
     assert snap.values["selected_clips"]["2"] == 0
+
+    # A caption tweak on the final re-cuts from the approved clips.
+    videos_before = len(magnific.video_calls)
+    decision = {"action": "revise", "edits": {"caption_style": {"uppercase": True}}}
+    snap, pending = await step(graph, Command(resume=decision))
+    assert pending["stage"] == "final" and renderer.renders[-1][1] == "final.mp4"
+    assert renderer.renders[-1][2] == CaptionStyle(font="cinzel", size=100, uppercase=True)
+    assert len(magnific.video_calls) == videos_before
+
+    snap, pending = await step(graph, Command(resume={"action": "approve"}))
+    assert pending is None and snap.values["status"] == "done"
 
 
 async def test_recent_figures_are_rejected(setup):
@@ -365,3 +395,8 @@ def test_validate_decision():
     too_long = GateDecision(action="approve", edits={"shots": [{"order": 1, "clip_seconds": 20}]})
     assert "3 to 15" in validate_decision("motion", too_long, state)
     assert "scene_orders" in validate_decision("clips", GateDecision(action="regenerate"), state)
+    unknown_model = GateDecision(action="approve", edits={"video_model": "sora"})
+    assert "video_model" in validate_decision("motion", unknown_model, state)
+    huge_caption = GateDecision(action="revise", edits={"caption_style": {"size": 400}})
+    assert "caption_style" in validate_decision("preview", huge_caption, state)
+    assert validate_decision("final", GateDecision(action="approve"), state) is None

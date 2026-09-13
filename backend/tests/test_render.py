@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from app.domain.models import WordTiming
+from app.domain.models import CaptionStyle, WordTiming
+from app.services.fonts import FONTS
 from app.services.render import (
     PreviewRenderer,
     SceneClip,
@@ -39,6 +40,37 @@ def test_captions_escape_override_braces():
     assert "(bold)" in ass and "{bold}" not in ass.split("[Events]")[1]
 
 
+def style_fields(ass: str) -> list[str]:
+    line = next(line for line in ass.splitlines() if line.startswith("Style: Caption,"))
+    return line.removeprefix("Style: ").split(",")
+
+
+def test_caption_style_sets_font_size_position_and_case():
+    timed = words(("one", 0.0, 0.2), ("two", 0.2, 0.4), ("three", 0.4, 0.6))
+    default = style_fields(build_captions(timed))
+    # Name, Fontname, Fontsize, ..., Bold (7), ..., Outline (16), Alignment (18), MarginV (21)
+    assert default[1:3] == ["Montserrat ExtraBold", "84"]
+    assert (default[7], default[18], default[21]) == ("0", "2", "520")
+
+    style = CaptionStyle(font="cinzel", size=120, position="center", uppercase=True)
+    ass = build_captions(timed, style)
+    fields = style_fields(ass)
+    assert fields[1:3] == ["Cinzel", "120"] and fields[7] == "-1"
+    assert (fields[16], fields[18], fields[21]) == ("8", "5", "0")
+    events = [line.split(",,")[-1] for line in ass.splitlines() if line.startswith("Dialogue")]
+    assert events == ["ONE TWO", "THREE"]  # two words per caption at large sizes
+
+    bottom = style_fields(build_captions(timed, CaptionStyle(position="bottom")))
+    assert bottom[21] == "260"
+
+
+def test_every_caption_font_is_bundled_with_its_license():
+    for font in FONTS.values():
+        assert font.path.is_file(), font.file
+    licenses = {path.name for path in FONTS["inter"].path.parent.glob("*-OFL.txt")}
+    assert len(licenses) == len(FONTS)
+
+
 def test_command_ducks_music_only_when_present():
     clips = [SceneClip("a.png", 2.0), SceneClip("b.png", 3.0)]
     with_bgm = " ".join(build_command("ffmpeg", clips, "n.mp3", "m.mp3", "c.ass", 5.0, "o.mp4"))
@@ -46,6 +78,11 @@ def test_command_ducks_music_only_when_present():
     assert "sidechaincompress" in with_bgm and "concat=n=2" in with_bgm
     assert "volume=0.2[bed]" in with_bgm
     assert "sidechaincompress" not in without
+    assert "subtitles=c.ass," in without
+    fonts = " ".join(
+        build_command("ffmpeg", clips, "n.mp3", None, "c.ass", 5.0, "o.mp4", fonts_dir="fonts")
+    )
+    assert "subtitles=c.ass:fontsdir=fonts," in fonts
     quieter = " ".join(
         build_command("ffmpeg", clips, "n.mp3", "m.mp3", "c.ass", 5.0, "o.mp4", bgm_volume=0.1)
     )
@@ -74,7 +111,12 @@ async def test_render_produces_a_vertical_video(tmp_path: Path):
 
     clips = [SceneClip("a.png", 1.5), SceneClip("b.png", 1.5)]
     timed = words(("Hello", 0.1, 0.6), ("world.", 0.7, 1.2), ("Again.", 1.6, 2.2))
-    output = await PreviewRenderer().render(tmp_path, clips, "narration.mp3", "bgm.mp3", timed, 3.0)
+    style = CaptionStyle(font="bebas-neue", size=110)
+    output = await PreviewRenderer().render(
+        tmp_path, clips, "narration.mp3", "bgm.mp3", timed, 3.0, caption_style=style
+    )
+    assert (tmp_path / "fonts" / "BebasNeue-Regular.ttf").is_file()
+    assert "Bebas Neue,110" in (tmp_path / "captions.ass").read_text(encoding="utf-8")
 
     probe = subprocess.run(
         ["ffprobe", "-v", "error",

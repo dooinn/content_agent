@@ -4,8 +4,15 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+ImageModel = Literal["gpt-image-2", "seedream"]
+ImageQuality = Literal["low", "medium", "high"]
+VideoModel = Literal["kling-v3-pro", "kling-v3-std", "kling-v3-turbo"]
+
 
 class Settings(BaseSettings):
+    """Server defaults. Image model, image quality, video model, and caption style can be
+    overridden per project."""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Claude
@@ -17,13 +24,13 @@ class Settings(BaseSettings):
     magnific_base_url: str = "https://api.magnific.com"
     magnific_poll_interval_s: float = 4.0
     magnific_task_timeout_s: float = 600.0
-    image_model: Literal["gpt-image-2", "seedream"] = "gpt-image-2"
-    image_quality: Literal["low", "medium", "high"] = "high"
+    image_model: ImageModel = "gpt-image-2"
+    image_quality: ImageQuality = "high"
     keyframe_candidates: int = 2
     image_concurrency: int = 4
 
     # Image-to-video: Kling 3 via Magnific
-    video_model: Literal["kling-v3-pro", "kling-v3-std", "kling-v3-turbo"] = "kling-v3-pro"
+    video_model: VideoModel = "kling-v3-pro"
     video_concurrency: int = 3
     video_task_timeout_s: float = 1200.0
     clip_candidates: int = 1

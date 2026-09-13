@@ -14,15 +14,17 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import date
 from pathlib import Path
-from typing import Literal, TypeVar
+from typing import Literal, TypeVar, get_args
 
 from langgraph.graph import END
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from app.config import ImageModel, ImageQuality, VideoModel
 from app.domain.models import (
     AngleOptions,
     Bgm,
+    CaptionStyle,
     CriticReport,
     FactCheckReport,
     FactSheet,
@@ -50,14 +52,20 @@ STAGE_ACTIONS = {
     "bible": {"approve", "revise"},
     "scenes": {"approve", "revise"},
     "keyframes": {"approve", "regenerate"},
-    "preview": {"approve", "regenerate"},
+    "preview": {"approve", "revise", "regenerate"},
     "motion": {"approve", "revise"},
     "clips": {"approve", "regenerate"},
+    "final": {"approve", "revise"},
 }
 SCENE_EDIT_FIELDS = {"description", "shot_type", "camera_move", "character_look", "image_prompt"}
 MOTION_EDIT_FIELDS = {"video_prompt", "clip_seconds"}
 SHOT_FIELDS = ("order", "narration", "video_prompt", "clip_seconds")
 TRUSTED_TIERS = {"scholarly", "reference"}
+MODEL_FIELDS = {
+    "image_model": get_args(ImageModel),
+    "image_quality": get_args(ImageQuality),
+    "video_model": get_args(VideoModel),
+}
 
 
 def check_eligibility(sheet: FactSheet, min_years: int, today: date | None = None) -> dict:
@@ -101,6 +109,15 @@ def validate_decision(stage: str, decision: GateDecision, state: dict) -> str | 
         return f"'{decision.action}' is not valid at stage '{stage}'; use {sorted(allowed)}"
     if decision.action == "regenerate" and not decision.scene_orders:
         return "scene_orders is required to regenerate"
+    for field, values in MODEL_FIELDS.items():
+        value = decision.edits.get(field)
+        if value is not None and value not in values:
+            return f"{field} must be one of {list(values)}"
+    if "caption_style" in decision.edits:
+        try:
+            CaptionStyle.model_validate(decision.edits["caption_style"])
+        except ValidationError as exc:
+            return f"invalid caption_style: {exc.errors()[0]['msg']}"
     selections = decision.edits.get("selections", {})
     if stage == "angle" and decision.action == "select":
         if decision.choice is None or not 0 <= decision.choice < len(state["angles"]):
@@ -128,6 +145,11 @@ def ask(stage: str, payload: dict) -> GateDecision:
     return GateDecision.model_validate(interrupt({"stage": stage, "payload": payload}))
 
 
+def model_edits(decision: GateDecision) -> dict:
+    """Model choices a reviewer may change right before the step that uses them."""
+    return {field: decision.edits[field] for field in MODEL_FIELDS if decision.edits.get(field)}
+
+
 class Pipeline:
     def __init__(self, deps: Deps):
         self.claude = deps.claude
@@ -137,11 +159,37 @@ class Pipeline:
         self.renderer = deps.renderer
         self.settings = deps.settings
 
-    async def _images(self, prompt: str, references: list[bytes], count: int) -> list[bytes]:
+    # ------------------------------------------------------------------ per-project settings
+
+    def _image_model(self, state: ProjectState) -> str:
+        return state.get("image_model") or self.settings.image_model
+
+    def _image_quality(self, state: ProjectState) -> str:
+        return state.get("image_quality") or self.settings.image_quality
+
+    def _video_model(self, state: ProjectState) -> str:
+        return state.get("video_model") or self.settings.video_model
+
+    @staticmethod
+    def _caption_style(state: ProjectState) -> CaptionStyle:
+        return CaptionStyle.model_validate(state.get("caption_style") or {})
+
+    @classmethod
+    def _caption_update(cls, state: ProjectState, decision: GateDecision) -> dict:
+        if "caption_style" not in decision.edits:
+            return {}
+        merged = {**cls._caption_style(state).model_dump(), **decision.edits["caption_style"]}
+        return {"caption_style": CaptionStyle.model_validate(merged).model_dump()}
+
+    # ------------------------------------------------------------------ helpers
+
+    async def _images(
+        self, state: ProjectState, prompt: str, references: list[bytes], count: int
+    ) -> list[bytes]:
         refs = [base64.b64encode(r).decode() for r in references] or None
-        if self.settings.image_model == "gpt-image-2":
+        if self._image_model(state) == "gpt-image-2":
             return await self.magnific.gpt_image(
-                prompt, refs, count=count, quality=self.settings.image_quality
+                prompt, refs, count=count, quality=self._image_quality(state)
             )
         batches = await asyncio.gather(
             *(self.magnific.seedream(prompt, refs) for _ in range(count))
@@ -214,7 +262,7 @@ class Pipeline:
 
             output = await self.renderer.render(
                 workdir, clips, "narration.mp3", bgm_name, narration.words, narration.duration,
-                output=f"{name}.mp4",
+                output=f"{name}.mp4", caption_style=self._caption_style(state),
             )
             key = f"projects/{state['project_id']}/{name}/{name}-{uuid.uuid4().hex[:8]}.mp4"
             await self.storage.put(key, output.read_bytes(), "video/mp4")
@@ -390,6 +438,7 @@ class Pipeline:
         looks = bible["character"]["looks"]
         sheets = await asyncio.gather(*(
             self._images(
+                state,
                 prompts.character_sheet_image(bible, look, has_style_reference=style is not None),
                 [style] if style else [],
                 count=1,
@@ -413,6 +462,7 @@ class Pipeline:
                 "feedback": decision.feedback,
                 "bible_image_only": bool(decision.edits.get("image_only")),
                 "style_ref_key": decision.edits.get("style_ref_key", state.get("style_ref_key")),
+                **model_edits(decision),
             })
         return Command(goto="scenes", update={
             "critic_rounds": 0, "critic_report": None, "feedback": decision.feedback,
@@ -477,7 +527,9 @@ class Pipeline:
             for scene in scenes:
                 if scene["order"] == edit.get("order"):
                     scene.update({k: v for k, v in edit.items() if k in SCENE_EDIT_FIELDS})
-        return Command(goto="keyframes", update={"scenes": scenes, "feedback": decision.feedback})
+        return Command(goto="keyframes", update={
+            "scenes": scenes, "feedback": decision.feedback, **model_edits(decision),
+        })
 
     async def keyframes(self, state: ProjectState) -> dict:
         project_id = state["project_id"]
@@ -499,7 +551,7 @@ class Pipeline:
                 scene, state.get("feedback"), character is not None, style is not None
             )
             async with limit:
-                return await self._images(prompt, refs, self.settings.keyframe_candidates)
+                return await self._images(state, prompt, refs, self.settings.keyframe_candidates)
 
         scenes = [scene for scene in state["scenes"] if scene["order"] in targets]
         results = await asyncio.gather(*(generate(scene) for scene in scenes))
@@ -520,14 +572,17 @@ class Pipeline:
 
     def gate_keyframes(self, state: ProjectState) -> Command:
         decision = ask("keyframes", {
-            "scenes": [{k: s[k] for k in ("order", "narration", "image_prompt")}
+            "scenes": [{k: s[k] for k in ("order", "narration", "image_prompt", "start", "end")}
                        for s in state["scenes"]],
             "keyframes": state["keyframes"],
             "selected": state["selected_keyframes"],
+            "image_model": self._image_model(state),
+            "image_quality": self._image_quality(state),
         })
         if decision.action == "regenerate":
             return Command(goto="keyframes", update={
                 "regen_orders": decision.scene_orders, "feedback": decision.feedback,
+                **model_edits(decision),
             })
         selections = {str(k): int(v) for k, v in decision.edits.get("selections", {}).items()}
         return Command(
@@ -542,12 +597,20 @@ class Pipeline:
                 "status": "preview_ready"}
 
     def gate_preview(self, state: ProjectState) -> Command:
-        decision = ask("preview", {"preview_key": state["preview_key"]})
+        decision = ask("preview", {
+            "preview_key": state["preview_key"],
+            "caption_style": self._caption_style(state).model_dump(),
+        })
         if decision.action == "regenerate":
             return Command(goto="keyframes", update={
                 "regen_orders": decision.scene_orders, "feedback": decision.feedback,
             })
-        return Command(goto="motion", update={"feedback": decision.feedback})
+        if decision.action == "revise":
+            # Caption changes only re-render the animatic; nothing is regenerated.
+            return Command(goto="preview", update=self._caption_update(state, decision))
+        return Command(goto="motion", update={
+            "feedback": decision.feedback, **self._caption_update(state, decision),
+        })
 
     # ------------------------------------------------------------------ video
 
@@ -578,7 +641,7 @@ class Pipeline:
         decision = ask("motion", {
             "shots": shots,
             "estimate": {
-                "model": self.settings.video_model,
+                "model": self._video_model(state),
                 "clips": len(shots) * candidates,
                 "total_seconds": sum(shot["clip_seconds"] for shot in shots) * candidates,
             },
@@ -590,7 +653,9 @@ class Pipeline:
             for scene in scenes:
                 if scene["order"] == edit.get("order"):
                     scene.update({k: v for k, v in edit.items() if k in MOTION_EDIT_FIELDS})
-        return Command(goto="clips", update={"scenes": scenes, "feedback": decision.feedback})
+        return Command(goto="clips", update={
+            "scenes": scenes, "feedback": decision.feedback, **model_edits(decision),
+        })
 
     async def clips(self, state: ProjectState) -> dict:
         project_id = state["project_id"]
@@ -599,6 +664,7 @@ class Pipeline:
         targets = set(state.get("regen_clip_orders") or [
             s["order"] for s in state["scenes"] if str(s["order"]) not in existing
         ])
+        video_model = self._video_model(state)
         limit = asyncio.Semaphore(self.settings.video_concurrency)
 
         async def generate(scene: dict) -> list[bytes]:
@@ -610,7 +676,7 @@ class Pipeline:
             async with limit:
                 batches = await asyncio.gather(*(
                     self.magnific.image_to_video(
-                        self.settings.video_model, image, content_type, prompt,
+                        video_model, image, content_type, prompt,
                         scene["clip_seconds"], self.settings.video_negative_prompt,
                     )
                     for _ in range(self.settings.clip_candidates)
@@ -648,15 +714,29 @@ class Pipeline:
             "clips": state.get("clips") or {},
             "selected": state.get("selected_clips") or {},
             "errors": state.get("clip_errors") or {},
+            "video_model": self._video_model(state),
         })
         if decision.action == "regenerate":
             return Command(goto="clips", update={
                 "regen_clip_orders": decision.scene_orders, "feedback": decision.feedback,
+                **model_edits(decision),
             })
         selections = {str(k): int(v) for k, v in decision.edits.get("selections", {}).items()}
         return Command(
             goto="final", update={"selected_clips": {**state["selected_clips"], **selections}}
         )
 
+    # ------------------------------------------------------------------ output
+
     async def final(self, state: ProjectState) -> dict:
         return {"final_key": await self._render(state, "final", "video"), "status": "final_ready"}
+
+    def gate_final(self, state: ProjectState) -> Command:
+        decision = ask("final", {
+            "final_key": state["final_key"],
+            "caption_style": self._caption_style(state).model_dump(),
+        })
+        if decision.action == "revise":
+            # Caption changes re-cut the final from the approved clips; nothing is regenerated.
+            return Command(goto="final", update=self._caption_update(state, decision))
+        return Command(goto=END, update={"status": "done"})

@@ -21,6 +21,7 @@ REVIEWED_BY = {
     "preview": "gate_preview",
     "motion": "gate_motion",
     "clips": "gate_clips",
+    "final": "gate_final",
 }
 
 # gate -> nodes it can route to
@@ -32,9 +33,10 @@ GATE_ROUTES = {
     "gate_bible": ("bible", "scenes"),
     "gate_scenes": ("scenes", "keyframes"),
     "gate_keyframes": ("keyframes", "preview"),
-    "gate_preview": ("keyframes", "motion"),
+    "gate_preview": ("keyframes", "preview", "motion"),
     "gate_motion": ("motion", "clips"),
     "gate_clips": ("clips", "final"),
+    "gate_final": ("final", END),
 }
 
 
@@ -42,7 +44,7 @@ def build_graph(deps: Deps, checkpointer: BaseCheckpointSaver):
     p = Pipeline(deps)
     graph = StateGraph(ProjectState)
 
-    for name in (*REVIEWED_BY, "scenes", "final"):
+    for name in (*REVIEWED_BY, "scenes"):
         graph.add_node(name, traced(f"node:{name}")(getattr(p, name)))
     graph.add_node(
         "critic", traced("node:critic")(p.critic), destinations=("scenes", "gate_scenes")
@@ -54,7 +56,6 @@ def build_graph(deps: Deps, checkpointer: BaseCheckpointSaver):
     for work, gate in REVIEWED_BY.items():
         graph.add_edge(work, gate)
     graph.add_edge("scenes", "critic")
-    graph.add_edge("final", END)
     return graph.compile(checkpointer=checkpointer)
 
 

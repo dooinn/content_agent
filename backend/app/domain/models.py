@@ -206,6 +206,21 @@ class CriticReport(BaseModel):
     issues: list[CriticIssue]
 
 
+# ---------------------------------------------------------------- captions
+
+CaptionFont = Literal["montserrat", "inter", "bebas-neue", "cinzel", "playfair"]
+CaptionPosition = Literal["bottom", "lower-third", "center"]
+
+
+class CaptionStyle(BaseModel):
+    """Burned-in caption look. Changing it only re-renders; nothing is regenerated."""
+
+    font: CaptionFont = "montserrat"
+    size: int = Field(default=84, ge=48, le=140, description="Pixels on a 1080x1920 frame.")
+    position: CaptionPosition = "lower-third"
+    uppercase: bool = False
+
+
 # ---------------------------------------------------------------- review gates
 
 

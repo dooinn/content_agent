@@ -4,7 +4,7 @@ A human-in-the-loop agent that turns a historical figure into a 30-second vertic
 
 Claude researches the figure with web search, proposes story angles, writes the narration, and designs every scene. Magnific generates the character reference and keyframes with GPT Image 2, and the background music. ElevenLabs voices the narration. A producer reviews and steers each stage before anything expensive happens.
 
-> Status: MVP 2. The pipeline runs from topic to a finished vertical video: a keyframe animatic for review, then Kling 3 clips cut to the narration. The frontend and GCP deployment are next.
+> Status: MVP 2. The pipeline runs from topic to a finished vertical video: a keyframe animatic for review, then Kling 3 clips cut to the narration. A Next.js review console covers every stage. GCP deployment is next.
 
 ## Pipeline
 
@@ -53,6 +53,7 @@ flowchart TD
 
 | Concern | Choice |
 |---|---|
+| Review console | Next.js 16, React 19, Tailwind CSS 4 |
 | API | FastAPI |
 | Orchestration | LangGraph, Postgres checkpointer |
 | LLM | Claude (`claude-sonnet-5`) with web search and structured outputs |
@@ -76,6 +77,16 @@ uv run python -m app                   # http://127.0.0.1:8000/docs
 ```
 
 Run `uv run python -m app` rather than `uvicorn` directly. On Windows it selects an event loop that psycopg's async driver supports.
+
+Then start the review console in a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev                            # http://localhost:3000
+```
+
+The console proxies `/api/*` and `/files/*` to the API (`BACKEND_URL`, default `http://127.0.0.1:8000`), so the backend needs no CORS setup.
 
 ## Using the API
 
@@ -123,6 +134,5 @@ The suite drives the full graph through every gate with fake providers, includin
 
 ## Roadmap
 
-1. Next.js review UI: a stage-by-stage wizard and a storyboard view.
-2. GCP: Cloud Run, Cloud SQL, GCS, Cloud Tasks, and Magnific webhooks in place of polling. Terraform and CI.
-3. Evals: fact grounding rate, critic catch rate, reviewer approval rate per stage.
+1. GCP: Cloud Run, Cloud SQL, GCS, Cloud Tasks, and Magnific webhooks in place of polling. Terraform and CI.
+2. Evals: fact grounding rate, critic catch rate, reviewer approval rate per stage.

@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Dark console palette: one gold accent for the current step and primary action. */
+  --color-canvas: #0b0b0f;
+  --color-surface: #15151b;
+  --color-raised: #1c1c24;
+  --color-line: #26262e;
+  --color-line-strong: #3a3a45;
+  --color-ink: #f4f4f5;
+  --color-dim: #a1a1aa;
+  --color-faint: #71717a;
+  --color-gold: #e8b04b;
+  --color-gold-strong: #f3c56a;
+  --color-ok: #4ade80;
+  --color-info: #60a5fa;
+  --color-danger: #f87171;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-canvas text-ink antialiased;
+}
+
+::selection {
+  @apply bg-gold/30;
+}

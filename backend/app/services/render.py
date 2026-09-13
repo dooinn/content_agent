@@ -5,16 +5,22 @@ narration timing (the final cut).
 """
 
 import asyncio
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from app.domain.models import WordTiming
+from app.domain.models import CaptionStyle, WordTiming
+from app.services.fonts import FONTS, CaptionFont
 
 WIDTH, HEIGHT, FPS = 1080, 1920, 30
 DEFAULT_BGM_VOLUME = 0.2
 PUNCTUATION = (".", ",", "!", "?", ";", ":")
+FONTS_SUBDIR = "fonts"
+
+# ASS alignment (numpad layout) and vertical margin in pixels on the 1920px frame.
+POSITIONS = {"bottom": (2, 260), "lower-third": (2, 520), "center": (5, 0)}
 
 ASS_HEADER = """[Script Info]
 ScriptType: v4.00+
@@ -26,12 +32,21 @@ WrapStyle: 0
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, \
 Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, \
 Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,Arial,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,2,\
-2,80,80,520,1
+{style}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+
+
+def caption_style_line(style: CaptionStyle, font: CaptionFont) -> str:
+    alignment, margin_v = POSITIONS[style.position]
+    outline = max(3, round(style.size * 0.07))
+    bold = -1 if font.bold else 0
+    return (
+        f"Style: Caption,{font.family},{style.size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
+        f"{bold},0,0,0,100,100,0,0,1,{outline},2,{alignment},80,80,{margin_v},1"
+    )
 
 
 class RenderError(RuntimeError):
@@ -71,15 +86,19 @@ def ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
 
 
-def build_captions(words: list[WordTiming]) -> str:
-    groups = group_caption_words(words)
-    lines = [ASS_HEADER]
+def build_captions(words: list[WordTiming], style: CaptionStyle | None = None) -> str:
+    style = style or CaptionStyle()
+    # Large type fits fewer words per line on a 1080px-wide frame.
+    groups = group_caption_words(words, max_words=2 if style.size > 110 else 3)
+    lines = [ASS_HEADER.format(style=caption_style_line(style, FONTS[style.font]))]
     for i, group in enumerate(groups):
         start, end = group[0].start, group[-1].end
         # Hold a caption until the next one when the pause is short, to avoid flicker.
         if i + 1 < len(groups) and groups[i + 1][0].start - end < 0.3:
             end = groups[i + 1][0].start
         text = " ".join(w.text for w in group).replace("{", "(").replace("}", ")")
+        if style.uppercase:
+            text = text.upper()
         lines.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Caption,,0,0,0,,{text}")
     return "\n".join(lines) + "\n"
 
@@ -112,6 +131,7 @@ def build_command(
     total: float,
     output: str,
     bgm_volume: float = DEFAULT_BGM_VOLUME,
+    fonts_dir: str | None = None,
 ) -> list[str]:
     """All paths are relative to the render working directory."""
     cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -124,7 +144,8 @@ def build_command(
     n = len(clips)
     filters = [_scene_filter(i, clip) for i, clip in enumerate(clips)]
     filters.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vcat]")
-    filters.append(f"[vcat]subtitles={captions},format=yuv420p[vout]")
+    subtitles = f"subtitles={captions}" + (f":fontsdir={fonts_dir}" if fonts_dir else "")
+    filters.append(f"[vcat]{subtitles},format=yuv420p[vout]")
 
     # Mix in stereo (narration is mono) and resample at the end: loudnorm works at 192 kHz
     # internally, and the encoder would otherwise keep a non-standard rate.
@@ -165,11 +186,18 @@ class PreviewRenderer:
         words: list[WordTiming],
         total: float,
         output: str = "preview.mp4",
+        caption_style: CaptionStyle | None = None,
     ) -> Path:
-        (workdir / "captions.ass").write_text(build_captions(words), encoding="utf-8")
+        style = caption_style or CaptionStyle()
+        # Only the chosen face goes in fontsdir, so libass cannot fall back to a system font.
+        fonts = workdir / FONTS_SUBDIR
+        fonts.mkdir(exist_ok=True)
+        font = FONTS[style.font]
+        shutil.copyfile(font.path, fonts / font.file)
+        (workdir / "captions.ass").write_text(build_captions(words, style), encoding="utf-8")
         cmd = build_command(
             self.ffmpeg, clips, narration, bgm, "captions.ass", total, output,
-            bgm_volume=self.bgm_volume,
+            bgm_volume=self.bgm_volume, fonts_dir=FONTS_SUBDIR,
         )
         # subprocess.run in a thread works on any event loop, including Windows selector loops.
         result = await asyncio.to_thread(
