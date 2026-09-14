@@ -9,6 +9,7 @@ from app.config import Settings
 from app.graph.pipeline import Pipeline
 from app.graph.state import Deps, ProjectState
 from app.observability import traced
+from app.usage import collect
 
 # work node -> the gate that reviews it
 REVIEWED_BY = {
@@ -45,9 +46,11 @@ def build_graph(deps: Deps, checkpointer: BaseCheckpointSaver):
     graph = StateGraph(ProjectState)
 
     for name in (*REVIEWED_BY, "scenes"):
-        graph.add_node(name, traced(f"node:{name}")(getattr(p, name)))
+        graph.add_node(name, traced(f"node:{name}")(collect(name)(getattr(p, name))))
     graph.add_node(
-        "critic", traced("node:critic")(p.critic), destinations=("scenes", "gate_scenes")
+        "critic",
+        traced("node:critic")(collect("critic")(p.critic)),
+        destinations=("scenes", "gate_scenes"),
     )
     for gate, routes in GATE_ROUTES.items():
         graph.add_node(gate, getattr(p, gate), destinations=routes)

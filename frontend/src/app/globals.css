@@ -22,6 +22,9 @@
 
 :root {
   color-scheme: dark;
+  /* Single-series chart mark: a gold step validated for the dark surface (L 0.48-0.67, >= 3:1),
+     darker than the UI accent so bars don't read as buttons. */
+  --viz-bar: #c98500;
 }
 
 body {

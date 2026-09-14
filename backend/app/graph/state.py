@@ -1,5 +1,6 @@
+import operator
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from app.config import Settings
 
@@ -25,6 +26,7 @@ class ProjectState(TypedDict, total=False):
     selected_angle: dict
     script: dict
     fact_checks: dict[str, dict]
+    fact_check_stats: dict[str, dict]  # drafts written and issues found, per checked stage
 
     voice_id: str | None
     audio_targets: list[str] | None
@@ -51,6 +53,9 @@ class ProjectState(TypedDict, total=False):
     clip_errors: dict[str, str]
     regen_clip_orders: list[int] | None
     final_key: str
+
+    # Tokens and media units recorded by app.usage; appended by every node that spends.
+    usage: Annotated[list[dict], operator.add]
 
 
 @dataclass

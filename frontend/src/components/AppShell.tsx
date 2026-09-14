@@ -1,4 +1,4 @@
-import { FolderOpen, Landmark, PlusCircle, ShieldCheck } from "lucide-react";
+import { FolderOpen, Gauge, Landmark, PlusCircle, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -27,25 +27,43 @@ function Sidebar({ children, width }: { children: ReactNode; width: string }) {
   );
 }
 
-export function HomeShell({ children }: { children: ReactNode }) {
+const navActive = "border border-gold/30 bg-gold/10 font-medium text-gold";
+const navIdle = "border border-transparent text-dim hover:bg-raised hover:text-ink";
+
+export function HomeShell({
+  children,
+  active = "projects",
+}: {
+  children: ReactNode;
+  active?: "projects" | "quality";
+}) {
   return (
     <div className="flex min-h-screen">
       <Sidebar width="w-64">
         <nav className="mt-8 space-y-1 text-sm">
           <Link
             href="/"
-            className="flex items-center gap-3 rounded-lg border border-gold/30 bg-gold/10 px-3 py-2 font-medium text-gold"
+            aria-current={active === "projects" ? "page" : undefined}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 ${active === "projects" ? navActive : navIdle}`}
           >
             <FolderOpen className="h-4 w-4" />
             Projects
           </Link>
-          <a
-            href="#new-short"
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-dim hover:bg-raised hover:text-ink"
+          <Link
+            href="/#new-short"
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 ${navIdle}`}
           >
             <PlusCircle className="h-4 w-4" />
             New short
-          </a>
+          </Link>
+          <Link
+            href="/quality"
+            aria-current={active === "quality" ? "page" : undefined}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 ${active === "quality" ? navActive : navIdle}`}
+          >
+            <Gauge className="h-4 w-4" />
+            Quality
+          </Link>
         </nav>
         <div className="mt-auto rounded-xl border border-line bg-surface p-4 text-xs leading-relaxed text-faint">
           <ShieldCheck className="mb-2 h-4 w-4 text-gold" />

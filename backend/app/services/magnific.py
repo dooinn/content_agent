@@ -12,6 +12,8 @@ import time
 
 import httpx
 
+from app import usage
+
 GPT_IMAGE = "/v1/ai/text-to-image/gpt-image-2"
 GPT_IMAGE_EDIT = "/v1/ai/text-to-image/gpt-image-2-edit"
 SEEDREAM = "/v1/ai/text-to-image/seedream-v4-5"
@@ -31,6 +33,14 @@ RETRYABLE_POST = {429, 503}
 
 class MagnificError(RuntimeError):
     pass
+
+
+def _record_media(model: str, unit: str, units: int, started: float, **extra) -> None:
+    """Successful generations only; Magnific bills in credits that the API does not report."""
+    usage.record(
+        "media", provider="magnific", model=model, unit=unit, units=units,
+        latency_s=round(time.monotonic() - started, 2), **extra,
+    )
 
 
 class MagnificClient:
@@ -68,24 +78,35 @@ class MagnificClient:
             "prompt": prompt, "num_images": count, "quality": quality, "resolution": "2k",
             "aspect_ratio": aspect_ratio, "output_format": "png",
         }
+        started = time.monotonic()
         if reference_images:
             body["reference_images"] = reference_images[:16]
-            return await self._generate(GPT_IMAGE_EDIT, body)
-        return await self._generate(GPT_IMAGE, body)
+            images = await self._generate(GPT_IMAGE_EDIT, body)
+        else:
+            images = await self._generate(GPT_IMAGE, body)
+        _record_media("gpt-image-2", "images", len(images), started, quality=quality)
+        return images
 
     async def seedream(
         self, prompt: str, reference_images: list[str] | None = None, aspect_ratio: str = VERTICAL
     ) -> list[bytes]:
         """Text-to-image, or reference-guided when images (base64 or URLs) are given."""
         body: dict = {"prompt": prompt, "aspect_ratio": aspect_ratio}
+        started = time.monotonic()
         if reference_images:
             body["reference_images"] = reference_images[:5]
-            return await self._generate(SEEDREAM_EDIT, body)
-        return await self._generate(SEEDREAM, body)
+            images = await self._generate(SEEDREAM_EDIT, body)
+        else:
+            images = await self._generate(SEEDREAM, body)
+        _record_media("seedream-4.5", "images", len(images), started)
+        return images
 
     async def music(self, prompt: str, seconds: int) -> list[bytes]:
         seconds = max(10, min(240, seconds))
-        return await self._generate(MUSIC, {"prompt": prompt, "music_length_seconds": seconds})
+        started = time.monotonic()
+        tracks = await self._generate(MUSIC, {"prompt": prompt, "music_length_seconds": seconds})
+        _record_media("music", "seconds", seconds, started)
+        return tracks
 
     # ------------------------------------------------------------ video
 
@@ -100,12 +121,15 @@ class MagnificClient:
     ) -> list[bytes]:
         """Animate a first-frame image with Kling 3 and return MP4 bytes, without audio."""
         duration = str(max(3, min(15, seconds)))
+        started = time.monotonic()
         if model == "kling-v3-turbo":
             body = {"image": base64.b64encode(image).decode(), "prompt": prompt,
                     "duration": duration}
-            return await self._generate(
+            clips = await self._generate(
                 f"{KLING_V3_TURBO}-1080p", body, KLING_V3_TURBO, self.video_task_timeout
             )
+            _record_media(model, "seconds", int(duration), started)
+            return clips
         if model not in ("kling-v3-pro", "kling-v3-std"):
             raise ValueError(f"unsupported video model: {model}")
         if len(image) > KLING_MAX_IMAGE_BYTES:
@@ -118,7 +142,9 @@ class MagnificClient:
         if negative_prompt:
             body["negative_prompt"] = negative_prompt
         tier = model.removeprefix("kling-v3-")
-        return await self._generate(f"{KLING_V3}-{tier}", body, KLING_V3, self.video_task_timeout)
+        clips = await self._generate(f"{KLING_V3}-{tier}", body, KLING_V3, self.video_task_timeout)
+        _record_media(model, "seconds", int(duration), started)
+        return clips
 
     async def upload(self, data: bytes, content_type: str) -> str:
         """Stage a local file on Magnific storage; returns a public URL valid for about a day."""

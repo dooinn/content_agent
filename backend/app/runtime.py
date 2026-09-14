@@ -10,7 +10,8 @@ from langgraph.types import Command
 from pydantic import BaseModel
 
 from app.domain.models import GateDecision
-from app.observability import flush, project_trace
+from app.observability import flush, project_trace, score_project, tracing_enabled
+from app.quality import project_metrics
 from app.services.storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -70,10 +71,20 @@ class ProjectRunner:
         self.graph = graph
         self.registry = registry
         self._tasks: dict[str, asyncio.Task] = {}
+        self._metrics: dict[str, tuple[datetime, dict]] = {}
 
     @staticmethod
     def config(project_id: str) -> dict:
         return {"configurable": {"thread_id": project_id}}
+
+    async def metrics(self, record: ProjectRecord) -> dict:
+        """Quality metrics, cached per project until it changes."""
+        cached = self._metrics.get(record.id)
+        if cached and cached[0] == record.updated_at and not self.is_running(record.id):
+            return cached[1]
+        data = await project_metrics(self.graph, record)
+        self._metrics[record.id] = (record.updated_at, data)
+        return data
 
     def is_running(self, project_id: str) -> bool:
         task = self._tasks.get(project_id)
@@ -125,6 +136,11 @@ class ProjectRunner:
                 record.status, record.stage = "awaiting_review", snap.interrupts[0].value["stage"]
             else:
                 record.status, record.stage = snap.values.get("status", "done"), None
+            if tracing_enabled():
+                try:
+                    score_project(project_id, await project_metrics(self.graph, record))
+                except Exception:
+                    logger.warning("could not score project %s", project_id, exc_info=True)
         except Exception as exc:
             logger.exception("project %s failed", project_id)
             record.status, record.error = "failed", f"{type(exc).__name__}: {exc}"

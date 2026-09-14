@@ -5,6 +5,7 @@ import type {
   ProjectRecord,
   ProjectSummary,
   ProjectView,
+  QualityReport,
 } from "./types";
 
 export class ApiError extends Error {
@@ -43,6 +44,10 @@ function postJson(body: unknown): RequestInit {
 
 export function getOptions() {
   return request<Options>("/options");
+}
+
+export function getQuality() {
+  return request<QualityReport>("/metrics");
 }
 
 export function listProjects() {

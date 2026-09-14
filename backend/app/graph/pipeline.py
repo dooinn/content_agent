@@ -227,10 +227,15 @@ class Pipeline:
         write: Callable[[object, dict | None], Awaitable[T]],
         sheet: dict,
         previous: object,
-    ) -> tuple[T, FactCheckReport]:
-        """Write a draft, check it against the fact sheet, and rewrite while claims fail."""
+    ) -> tuple[T, FactCheckReport, dict]:
+        """Write a draft, check it against the fact sheet, and rewrite while claims fail.
+
+        Also returns how many drafts it took and how many issues the first draft had, which is
+        how often the writer invents claims before the checker catches them.
+        """
         draft: T | None = None
         report: FactCheckReport | None = None
+        issue_counts: list[int] = []
         for _ in range(self.settings.max_fact_rewrites + 1):
             review = report.model_dump() if report else None
             if draft is not None:
@@ -242,13 +247,25 @@ class Pipeline:
                 schema=FactCheckReport,
                 effort="medium",
             )
-            if report.passed or not report.issues:
+            passed = report.passed or not report.issues
+            issue_counts.append(0 if passed else len(report.issues))
+            if passed:
                 break
-        return draft, report
+        stats = {
+            "drafts": len(issue_counts),
+            "issues_per_draft": issue_counts,
+            "passed": issue_counts[-1] == 0,
+        }
+        return draft, report, stats
 
     @staticmethod
-    def _with_fact_check(state: ProjectState, stage: str, report: FactCheckReport) -> dict:
-        return {**(state.get("fact_checks") or {}), stage: report.model_dump()}
+    def _with_fact_check(
+        state: ProjectState, stage: str, report: FactCheckReport, stats: dict
+    ) -> dict:
+        return {
+            "fact_checks": {**(state.get("fact_checks") or {}), stage: report.model_dump()},
+            "fact_check_stats": {**(state.get("fact_check_stats") or {}), stage: stats},
+        }
 
     async def _render(self, state: ProjectState, name: str, kind: Literal["image", "video"]) -> str:
         """Cut the selected keyframes (animatic) or clips (final) to the narration."""
@@ -330,12 +347,12 @@ class Pipeline:
                 schema=AngleOptions,
             )
 
-        options, report = await self._fact_checked(
+        options, report, stats = await self._fact_checked(
             "set of story angles", write, sheet, state.get("angles")
         )
         return {
             "angles": [a.model_dump() for a in options.angles],
-            "fact_checks": self._with_fact_check(state, "angles", report),
+            **self._with_fact_check(state, "angles", report, stats),
             "feedback": None,
         }
 
@@ -362,12 +379,12 @@ class Pipeline:
                 schema=Script,
             )
 
-        result, report = await self._fact_checked(
+        result, report, stats = await self._fact_checked(
             "narration script", write, sheet, state.get("script")
         )
         return {
             "script": result.model_dump(),
-            "fact_checks": self._with_fact_check(state, "script", report),
+            **self._with_fact_check(state, "script", report, stats),
             "feedback": None,
         }
 

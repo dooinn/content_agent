@@ -1,12 +1,14 @@
 """Claude calls used by the pipeline: web research and schema-validated generation."""
 
 import base64
+import time
 from dataclasses import dataclass, field
 from typing import TypeVar
 
 import anthropic
 from pydantic import BaseModel
 
+from app import usage
 from app.services.media import image_type
 
 T = TypeVar("T", bound=BaseModel)
@@ -28,6 +30,25 @@ class ClaudeRefusal(RuntimeError):
 class ResearchResult:
     notes: str
     sources: list[dict] = field(default_factory=list)
+
+
+def _record_usage(response, purpose: str, started: float) -> None:
+    tokens = getattr(response, "usage", None)
+    if tokens is None:
+        return
+    server_tools = getattr(tokens, "server_tool_use", None)
+    usage.record(
+        "llm",
+        provider="anthropic",
+        model=getattr(response, "model", None),
+        purpose=purpose,
+        input_tokens=tokens.input_tokens or 0,
+        output_tokens=tokens.output_tokens or 0,
+        cache_write_tokens=getattr(tokens, "cache_creation_input_tokens", None) or 0,
+        cache_read_tokens=getattr(tokens, "cache_read_input_tokens", None) or 0,
+        web_searches=getattr(server_tools, "web_search_requests", None) or 0,
+        latency_s=round(time.monotonic() - started, 2),
+    )
 
 
 def _raise_on_refusal(response) -> None:
@@ -79,6 +100,7 @@ class Claude:
         content.append({"type": "text", "text": prompt})
         # Streamed so long outputs (scene sets for 3-minute videos) are not cut by the
         # non-streaming request timeout.
+        started = time.monotonic()
         async with self.client.beta.messages.stream(
             model=self.model,
             max_tokens=MAX_OUTPUT_TOKENS,
@@ -89,6 +111,7 @@ class Claude:
             **self._fallbacks(),
         ) as stream:
             response = await stream.get_final_message()
+        _record_usage(response, schema.__name__, started)
         _raise_on_refusal(response)
         if response.stop_reason == "max_tokens":
             raise RuntimeError(f"{schema.__name__} output hit the {MAX_OUTPUT_TOKENS}-token limit")
@@ -103,6 +126,7 @@ class Claude:
         sources: dict[str, str] = {}
 
         for _ in range(MAX_CONTINUATIONS):
+            started = time.monotonic()
             response = await self.client.beta.messages.create(
                 model=self.model,
                 max_tokens=16000,
@@ -111,6 +135,7 @@ class Claude:
                 tools=[WEB_SEARCH_TOOL],
                 **self._fallbacks(),
             )
+            _record_usage(response, "research", started)
             _raise_on_refusal(response)
             for block in response.content:
                 if block.type == "text":

@@ -4,7 +4,7 @@ A human-in-the-loop agent that turns a historical figure into a vertical story v
 
 Claude researches the figure with web search, proposes story angles, writes the narration, and designs every scene. Magnific generates the character reference and keyframes with GPT Image 2, and the background music. ElevenLabs voices the narration. A producer reviews and steers each stage before anything expensive happens.
 
-> Status: MVP 3. The pipeline runs from topic to a finished vertical video: a keyframe animatic for review, then Kling 3 clips cut to the narration. A Next.js review console covers every stage, with per-project length, image and video models, and caption styling. It runs on Google Cloud Run behind Identity-Aware Proxy, with Cloud SQL checkpoints and assets in Cloud Storage.
+> Status: MVP 3. The pipeline runs from topic to a finished vertical video: a keyframe animatic for review, then Kling 3 clips cut to the narration. A Next.js review console covers every stage, with per-project length, image and video models, and caption styling, plus a Quality page for review, fact-check, critic, and cost metrics. It runs on Google Cloud Run behind Identity-Aware Proxy, with Cloud SQL checkpoints and assets in Cloud Storage.
 
 ![Projects](docs/screenshots/home.png)
 
@@ -57,6 +57,7 @@ flowchart TD
 - **Style by example, identity by reference.** A producer can upload a style reference image. Claude reads it to write the visual bible, and GPT Image 2 renders a character sheet in that style for each look the story needs, such as a young and a mature version of the same person. Each scene names the look it shows, and its keyframe gets that character sheet plus the style image as references, with the prompt stating each image's role, so faces and the style stay consistent across scenes.
 - **Spend where review says so.** Video is the expensive step. The pipeline first renders a free animatic from the keyframes, then shows the clip count and total seconds before any clip is generated. Clip lengths follow the narration, rounded up to Kling's whole seconds and trimmed in the edit. A failed clip doesn't discard the clips that succeeded, and generation requests are never retried on errors that may already have created a billed task. Image and video models are chosen per project and can be switched at the gate right before they are used.
 - **Free iteration where it's cheap.** Caption font, size, position, and case are applied at render time, so the animatic and the final cut can be re-rendered with new captions without regenerating any image or clip. Five OFL fonts ship with the renderer and are passed to libass through `fontsdir`, so captions look the same on any machine.
+- **Quality is read back from checkpoints.** Every gate leaves its stage and the reviewer's decision on a LangGraph checkpoint, so first-try approval and redos per stage come from the checkpoint history of every project, with no separate event log. The same history gives the fact checker's drafts and first-draft issues, the critic's findings by category, and the images and clip seconds generated. Provider clients record tokens and media units into a `usage` state channel, priced from Anthropic's list prices. `GET /metrics` and the console's Quality page show it; with Langfuse keys set, each run also upserts the numbers as session scores.
 - **Guardrail on real people.** Only figures who died at least 75 years ago are accepted (`MIN_YEARS_SINCE_DEATH`).
 - **Official Anthropic SDK inside LangGraph nodes.** Web search, structured outputs, and server-side refusal fallbacks are used directly, with no wrapper layer. Langfuse traces each run as a session per project.
 
@@ -117,6 +118,9 @@ curl -X POST localhost:8000/projects -H "Content-Type: application/json" \
 # Lengths, models, caption fonts, and server defaults
 curl localhost:8000/options
 
+# Review, fact-check, critic, media, and Claude cost metrics across projects
+curl localhost:8000/metrics
+
 # Poll: `stage` and `payload` show what is waiting for review; `assets` maps files to URLs
 curl localhost:8000/projects/<id>
 
@@ -157,4 +161,4 @@ The suite drives the full graph through every gate with fake providers, includin
 ## Roadmap
 
 1. Durable execution: Cloud Tasks or Cloud Run jobs for generation, and Magnific webhooks in place of polling, so runs survive scale-down and can use more than one instance. Terraform and CI.
-2. Evals: fact grounding rate, critic catch rate, reviewer approval rate per stage.
+2. Offline evals: a fixed set of figures run against prompt changes, scoring fact grounding and critic recall with an LLM judge, next to the production metrics already on the Quality page.

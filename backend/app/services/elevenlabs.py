@@ -1,9 +1,12 @@
 """ElevenLabs text-to-speech with character-level timestamps."""
 
 import base64
+import time
 from dataclasses import dataclass
 
 import httpx
+
+from app import usage
 
 
 @dataclass
@@ -37,6 +40,7 @@ class ElevenLabsClient:
     async def speak(self, text: str, voice_id: str) -> SpeechResult:
         if not voice_id:
             raise ElevenLabsError("no voice id configured (set ELEVENLABS_VOICE_ID)")
+        started = time.monotonic()
         response = await self.http.post(
             f"{self.base_url}/v1/text-to-speech/{voice_id}/with-timestamps",
             params={"output_format": "mp3_44100_128"},
@@ -50,6 +54,10 @@ class ElevenLabsClient:
         if response.is_error:
             raise ElevenLabsError(f"TTS failed {response.status_code}: {response.text[:500]}")
         body = response.json()
+        usage.record(
+            "media", provider="elevenlabs", model=self.model_id, unit="characters",
+            units=len(text), latency_s=round(time.monotonic() - started, 2),
+        )
         alignment = body["alignment"]
         return SpeechResult(
             audio=base64.b64decode(body["audio_base64"]),

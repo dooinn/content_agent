@@ -54,6 +54,37 @@ def project_trace(project_id: str, stage: str) -> Iterator[None]:
             yield
 
 
+def tracing_enabled() -> bool:
+    return _enabled
+
+
+def score_project(project_id: str, metrics: dict) -> None:
+    """Upsert session-level Langfuse scores for a project from app.quality metrics."""
+    if not _enabled:
+        return
+    from langfuse import get_client
+
+    critic, llm, fact_checks = metrics["critic"], metrics["llm"], metrics["fact_check"]
+    scores = {
+        "review_first_try_rate": metrics["reviews"]["first_try_rate"],
+        "review_rework": metrics["reviews"]["rework"],
+        "fact_check_first_draft_issues": (
+            sum(fc["first_draft_issues"] for fc in fact_checks.values()) if fact_checks else None
+        ),
+        "critic_issues_found": critic["issues_found"] if critic else None,
+        "claude_cost_usd": llm["cost_usd"] if llm else None,
+        "images_generated": metrics["media"]["images"],
+        "clip_seconds_generated": metrics["media"]["clip_seconds"],
+    }
+    client = get_client()
+    for name, value in scores.items():
+        if value is not None:
+            client.create_score(
+                name=name, value=float(value), session_id=project_id, data_type="NUMERIC",
+                score_id=f"{project_id}-{name}",  # one current value per project, not a history
+            )
+
+
 def flush() -> None:
     if _enabled:
         from langfuse import get_client

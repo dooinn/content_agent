@@ -10,6 +10,7 @@ from app.config import ImageModel, ImageQuality, VideoModel, get_settings
 from app.domain.length import DEFAULT_TARGET_SECONDS, PROFILES, TargetSeconds
 from app.domain.models import CaptionStyle, GateDecision
 from app.graph.pipeline import validate_decision
+from app.quality import summarize
 from app.runtime import ProjectRecord, ProjectRunner, pick_thumbnail
 from app.services.fonts import FONTS
 from app.services.media import image_type
@@ -196,6 +197,20 @@ async def get_project(project_id: str, request: Request) -> ProjectView:
         state=snap.values,
         assets={key: storage.url(key) for key in sorted(_asset_keys(snap.values))},
     )
+
+
+@router.get("/metrics")
+async def quality_report(request: Request) -> dict:
+    """Review, fact-check, critic, media, and Claude cost metrics for every project."""
+    runner = _runner(request)
+    projects = [await runner.metrics(record) for record in await runner.registry.list()]
+    return {"summary": summarize(projects), "projects": projects}
+
+
+@router.get("/projects/{project_id}/metrics")
+async def project_quality(project_id: str, request: Request) -> dict:
+    runner = _runner(request)
+    return await runner.metrics(await _record_or_404(runner, project_id))
 
 
 @router.post("/projects/{project_id}/decisions", status_code=202)

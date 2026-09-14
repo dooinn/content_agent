@@ -286,6 +286,85 @@ export interface FinalPayload {
   caption_style?: CaptionStyle;
 }
 
+// ------------------------------------------------------------ quality metrics (GET /metrics)
+
+export interface StageQuality {
+  stage: Stage;
+  projects: number;
+  first_try_rate: number | null;
+  rework_per_project: number | null;
+}
+
+export interface QualitySummary {
+  projects: number;
+  finished: number;
+  first_try_rate: number | null;
+  stages: StageQuality[];
+  fact_check: {
+    runs: number;
+    clean_first_draft_rate: number | null;
+    drafts_per_run: number | null;
+    issues_caught: number;
+  };
+  critic: {
+    projects: number;
+    issues_found: number;
+    issues_per_project: number | null;
+    categories: Record<string, number>;
+  };
+  cost: { tracked_projects: number; claude_usd_total: number; claude_usd_per_project: number | null };
+  media_per_finished: { images: number | null; clip_seconds: number | null };
+}
+
+export interface ProjectQuality {
+  project_id: string;
+  topic: string;
+  status: Status;
+  target_seconds: number;
+  reviews: {
+    decisions: number;
+    rework: number;
+    with_feedback: number;
+    first_try_rate: number | null;
+    by_stage: Record<string, { decisions: number; first_try: boolean; actions: Record<string, number> }>;
+  };
+  fact_check: Record<
+    string,
+    { runs: number; drafts: number; first_draft_issues: number; clean_first_drafts: number; final_passed: boolean | null }
+  >;
+  critic: {
+    reports: number;
+    reports_with_issues: number;
+    issues_found: number;
+    categories: Record<string, number>;
+    final_passed: boolean;
+  } | null;
+  media: {
+    images: number;
+    keyframes: number;
+    character_sheets: number;
+    clips: number;
+    clip_seconds: number;
+    narration_takes: number;
+    music_tracks: number;
+    music_seconds: number;
+  };
+  llm: {
+    calls: number;
+    input_tokens: number;
+    output_tokens: number;
+    web_searches: number;
+    cost_usd: number;
+    unpriced_calls: number;
+    cost_by_node: Record<string, number>;
+  } | null;
+}
+
+export interface QualityReport {
+  summary: QualitySummary;
+  projects: ProjectQuality[];
+}
+
 export interface StageProps<P> {
   view: ProjectView;
   payload: P;
