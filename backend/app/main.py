@@ -53,8 +53,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="History Shorts Agent", version="0.1.0", lifespan=lifespan)
-app.include_router(router)
 
+# Mounted before the router so local files win over the GCS redirect route at the same path.
 if settings.storage_backend == "local":
     settings.local_storage_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/files", StaticFiles(directory=settings.local_storage_dir), name="files")
+app.include_router(router)

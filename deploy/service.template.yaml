@@ -1,0 +1,75 @@
+# Cloud Run service: the review console (ingress) with the agent API as a sidecar.
+# Rendered by deploy/render.py; API keys are Secret Manager references, never inlined.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: shorts
+  annotations:
+    run.googleapis.com/ingress: all
+    # Keep IAP on across `services replace`; access is granted per Google account.
+    run.googleapis.com/iap-enabled: "true"
+spec:
+  template:
+    metadata:
+      annotations:
+        # One instance: projects run as in-process background tasks.
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "1"
+        # CPU stays on between requests so generation keeps running while the console polls.
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/cloudsql-instances: ${project}:${region}:shorts-db
+        run.googleapis.com/container-dependencies: '{"console": ["api"]}'
+    spec:
+      serviceAccountName: shorts-run@${project}.iam.gserviceaccount.com
+      timeoutSeconds: 300
+      containers:
+      - name: console
+        image: ${region}-docker.pkg.dev/${project}/shorts/console:${tag}
+        ports:
+        - containerPort: 8080
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+      - name: api
+        image: ${region}-docker.pkg.dev/${project}/shorts/api:${tag}
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 2
+          failureThreshold: 60
+        env:
+        - name: STORAGE_BACKEND
+          value: gcs
+        - name: GCS_BUCKET
+          value: ${project}-shorts
+        - name: CHECKPOINTER
+          value: postgres
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: shorts-database-url
+              key: latest
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anthropic-api-key
+              key: latest
+        - name: MAGNIFIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: magnific-api-key
+              key: latest
+        - name: ELEVENLABS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: elevenlabs-api-key
+              key: latest
+${extra_env}

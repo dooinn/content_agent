@@ -4,6 +4,8 @@ import type { NextConfig } from "next";
 const backend = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
 const nextConfig: NextConfig = {
+  // A self-contained server for the Cloud Run container image.
+  output: "standalone",
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${backend}/:path*` },

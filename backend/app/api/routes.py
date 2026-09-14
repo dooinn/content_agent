@@ -1,8 +1,9 @@
+import asyncio
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from app.config import ImageModel, ImageQuality, VideoModel, get_settings
@@ -12,6 +13,7 @@ from app.graph.pipeline import validate_decision
 from app.runtime import ProjectRecord, ProjectRunner, pick_thumbnail
 from app.services.fonts import FONTS
 from app.services.media import image_type
+from app.services.storage import GCSStorage
 
 router = APIRouter()
 
@@ -96,6 +98,15 @@ async def _require_upload(runner: ProjectRunner, key: str | None) -> None:
 @router.get("/health")
 async def health() -> dict:
     return {"ok": True}
+
+
+@router.get("/files/{key:path}", include_in_schema=False)
+async def cloud_file(key: str, request: Request) -> RedirectResponse:
+    """With GCS, send the browser to a signed URL. Local storage mounts /files as static files."""
+    storage = _runner(request).registry.storage
+    if not isinstance(storage, GCSStorage) or not key.startswith(ASSET_PREFIXES):
+        raise HTTPException(404, "file not found")
+    return RedirectResponse(await asyncio.to_thread(storage.signed_url, key))
 
 
 @router.get("/options")

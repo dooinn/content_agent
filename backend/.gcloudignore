@@ -1,0 +1,11 @@
+# Source uploaded to Cloud Build; keep local environments, secrets, and generated data out.
+.gcloudignore
+.venv/
+data/
+tests/
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+.ruff_cache/
