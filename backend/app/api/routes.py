@@ -6,6 +6,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.config import ImageModel, ImageQuality, VideoModel, get_settings
+from app.domain.length import DEFAULT_TARGET_SECONDS, PROFILES, TargetSeconds
 from app.domain.models import CaptionStyle, GateDecision
 from app.graph.pipeline import validate_decision
 from app.runtime import ProjectRecord, ProjectRunner, pick_thumbnail
@@ -43,6 +44,7 @@ class CreateProject(BaseModel):
     style_ref_key: str | None = Field(
         default=None, description="Key returned by POST /uploads; sets the visual style."
     )
+    target_seconds: TargetSeconds | None = None
     image_model: ImageModel | None = None
     image_quality: ImageQuality | None = None
     video_model: VideoModel | None = None
@@ -101,6 +103,14 @@ async def options() -> dict:
     """Choices the console offers, with the server defaults."""
     settings = get_settings()
     return {
+        "durations": [
+            {
+                "seconds": profile.seconds,
+                "label": profile.label,
+                "note": f"{profile.segments[0]}–{profile.segments[1]} scenes",
+            }
+            for profile in PROFILES.values()
+        ],
         "image_models": IMAGE_MODELS,
         "image_qualities": ["low", "medium", "high"],
         "video_models": VIDEO_MODELS,
@@ -108,6 +118,7 @@ async def options() -> dict:
         "caption_positions": CAPTION_POSITIONS,
         "caption_size": {"min": 48, "max": 140},
         "defaults": {
+            "target_seconds": DEFAULT_TARGET_SECONDS,
             "image_model": settings.image_model,
             "image_quality": settings.image_quality,
             "video_model": settings.video_model,
@@ -136,7 +147,8 @@ async def create_project(body: CreateProject, request: Request) -> ProjectRecord
     runner = _runner(request)
     await _require_upload(runner, body.style_ref_key)
     options = body.model_dump(
-        include={"image_model", "image_quality", "video_model", "caption_style"}, exclude_none=True
+        include={"target_seconds", "image_model", "image_quality", "video_model", "caption_style"},
+        exclude_none=True,
     )
     return await runner.create(body.topic, body.voice_id, body.style_ref_key, options)
 

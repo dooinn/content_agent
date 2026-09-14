@@ -52,7 +52,14 @@ export interface ModelOption {
   note: string;
 }
 
+export interface DurationOption {
+  seconds: number;
+  label: string;
+  note: string;
+}
+
 export interface Options {
+  durations: DurationOption[];
   image_models: ModelOption[];
   image_qualities: string[];
   video_models: ModelOption[];
@@ -60,6 +67,7 @@ export interface Options {
   caption_positions: { id: CaptionPosition; label: string }[];
   caption_size: { min: number; max: number };
   defaults: {
+    target_seconds: number;
     image_model: string;
     image_quality: string;
     video_model: string;
@@ -187,6 +195,7 @@ export interface ProjectState {
   selected_clips?: Record<string, number>;
   preview_key?: string;
   final_key?: string;
+  target_seconds?: number | null;
   image_model?: string | null;
   image_quality?: string | null;
   video_model?: string | null;
@@ -226,6 +235,7 @@ export interface ScriptPayload {
   script: Script;
   word_count: number;
   estimated_seconds: number;
+  target_seconds?: number;
   fact_check: FactCheckReport | null;
 }
 

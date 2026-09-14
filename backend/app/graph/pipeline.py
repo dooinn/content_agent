@@ -21,6 +21,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, ValidationError
 
 from app.config import ImageModel, ImageQuality, VideoModel
+from app.domain.length import TARGET_SECONDS, LengthProfile, length_profile
 from app.domain.models import (
     AngleOptions,
     Bgm,
@@ -113,6 +114,11 @@ def validate_decision(stage: str, decision: GateDecision, state: dict) -> str | 
         value = decision.edits.get(field)
         if value is not None and value not in values:
             return f"{field} must be one of {list(values)}"
+    if "target_seconds" in decision.edits:
+        if stage != "research":
+            return "target_seconds can only change at the research stage, before the story"
+        if decision.edits["target_seconds"] not in TARGET_SECONDS:
+            return f"target_seconds must be one of {list(TARGET_SECONDS)}"
     if "caption_style" in decision.edits:
         try:
             CaptionStyle.model_validate(decision.edits["caption_style"])
@@ -150,6 +156,11 @@ def model_edits(decision: GateDecision) -> dict:
     return {field: decision.edits[field] for field in MODEL_FIELDS if decision.edits.get(field)}
 
 
+def length_edit(decision: GateDecision) -> dict:
+    target = decision.edits.get("target_seconds")
+    return {"target_seconds": target} if target else {}
+
+
 class Pipeline:
     def __init__(self, deps: Deps):
         self.claude = deps.claude
@@ -169,6 +180,10 @@ class Pipeline:
 
     def _video_model(self, state: ProjectState) -> str:
         return state.get("video_model") or self.settings.video_model
+
+    @staticmethod
+    def _length(state: ProjectState) -> LengthProfile:
+        return length_profile(state.get("target_seconds"))
 
     @staticmethod
     def _caption_style(state: ProjectState) -> CaptionStyle:
@@ -272,7 +287,8 @@ class Pipeline:
 
     async def research(self, state: ProjectState) -> dict:
         found = await self.claude.research(
-            system=prompts.SYSTEM, prompt=prompts.research(state["topic"], state.get("feedback"))
+            system=prompts.SYSTEM,
+            prompt=prompts.research(state["topic"], state.get("feedback"), self._length(state)),
         )
         sheet = await self.claude.generate(
             system=prompts.SYSTEM,
@@ -290,12 +306,15 @@ class Pipeline:
         decision = ask(
             "research", {"fact_sheet": state["fact_sheet"], "eligibility": state["eligibility"]}
         )
+        length = length_edit(decision)
         if decision.action == "revise":
             topic = decision.edits.get("topic", state["topic"])
-            return Command(goto="research", update={"feedback": decision.feedback, "topic": topic})
+            return Command(
+                goto="research", update={"feedback": decision.feedback, "topic": topic, **length}
+            )
         if not state["eligibility"]["ok"]:
             return Command(goto=END, update={"status": "rejected"})
-        return Command(goto="angles", update={"feedback": decision.feedback})
+        return Command(goto="angles", update={"feedback": decision.feedback, **length})
 
     # ------------------------------------------------------------------ story
 
@@ -305,7 +324,9 @@ class Pipeline:
         async def write(previous, review) -> AngleOptions:
             return await self.claude.generate(
                 system=prompts.SYSTEM,
-                prompt=prompts.angles(sheet, state.get("feedback"), previous, review),
+                prompt=prompts.angles(
+                    sheet, state.get("feedback"), previous, review, self._length(state)
+                ),
                 schema=AngleOptions,
             )
 
@@ -335,7 +356,8 @@ class Pipeline:
             return await self.claude.generate(
                 system=prompts.SYSTEM,
                 prompt=prompts.script(
-                    sheet, state["selected_angle"], state.get("feedback"), previous, review
+                    sheet, state["selected_angle"], state.get("feedback"), previous, review,
+                    self._length(state),
                 ),
                 schema=Script,
             )
@@ -355,6 +377,7 @@ class Pipeline:
             "script": state["script"],
             "word_count": script.word_count,
             "estimated_seconds": round(script.word_count / 155 * 60, 1),
+            "target_seconds": self._length(state).seconds,
             "fact_check": (state.get("fact_checks") or {}).get("script"),
         })
         if decision.action == "revise":

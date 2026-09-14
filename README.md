@@ -1,6 +1,6 @@
 # History Shorts Agent
 
-A human-in-the-loop agent that turns a historical figure into a 30-second vertical story short.
+A human-in-the-loop agent that turns a historical figure into a vertical story video: a 30-second short or a 1-, 2-, or 3-minute story. The chosen length sets the research depth, story structure, word budget, and scene count.
 
 Claude researches the figure with web search, proposes story angles, writes the narration, and designs every scene. Magnific generates the character reference and keyframes with GPT Image 2, and the background music. ElevenLabs voices the narration. A producer reviews and steers each stage before anything expensive happens.
 

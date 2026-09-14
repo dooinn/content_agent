@@ -13,6 +13,7 @@ class ProjectState(TypedDict, total=False):
     feedback: str | None
 
     # Per-project overrides of the server defaults.
+    target_seconds: int | None
     image_model: str | None
     image_quality: str | None
     video_model: str | None

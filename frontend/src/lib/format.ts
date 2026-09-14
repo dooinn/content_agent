@@ -6,6 +6,12 @@ export function mmss(seconds: number) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
+/** 30 -> "30 sec", 120 -> "2 min"; projects without a length are 30-second shorts. */
+export function lengthLabel(seconds?: number | null) {
+  const value = seconds ?? 30;
+  return value < 60 ? `${value} sec` : `${value / 60} min`;
+}
+
 export function timeRange(start?: number, end?: number) {
   return start === undefined || end === undefined ? "" : `${mmss(start)}–${mmss(end)}`;
 }

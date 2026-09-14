@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ActionBar } from "@/components/ActionBar";
 import { FactCheckNote } from "@/components/ReviewNotes";
 import { Badge, Button, Card, DirectionInput, inputClass } from "@/components/ui";
+import { lengthLabel } from "@/lib/format";
 import type { ScriptPayload, StageProps } from "@/lib/types";
 
 const WORDS_PER_MINUTE = 155;
@@ -17,6 +18,7 @@ export function ScriptStage({ payload, send, pending }: StageProps<ScriptPayload
   const edited = texts.some((text, i) => text !== original[i]);
   const words = texts.join(" ").split(/\s+/).filter(Boolean).length;
   const seconds = Math.round((words / WORDS_PER_MINUTE) * 60);
+  const target = payload.target_seconds ?? 30;
 
   return (
     <div className="space-y-6">
@@ -27,7 +29,9 @@ export function ScriptStage({ payload, send, pending }: StageProps<ScriptPayload
           <h2 className="text-xl font-semibold">{payload.script.title}</h2>
           <div className="flex gap-2">
             <Badge>{words} words</Badge>
-            <Badge tone={seconds > 32 ? "amber" : "green"}>about {seconds}s</Badge>
+            <Badge tone={Math.abs(seconds - target) > target * 0.1 ? "amber" : "green"}>
+              about {seconds}s of {lengthLabel(target)}
+            </Badge>
           </div>
         </div>
         <ol className="mt-5 space-y-3">

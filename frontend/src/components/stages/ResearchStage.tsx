@@ -3,16 +3,20 @@
 import { Check, ExternalLink, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import { ActionBar } from "@/components/ActionBar";
+import { LengthPicker } from "@/components/LengthPicker";
 import { Badge, Button, Card, Detail, DirectionInput, SectionTitle, inputClass } from "@/components/ui";
 import type { ResearchPayload, StageProps } from "@/lib/types";
 
 const factTone = { verified: "green", disputed: "amber", legend: "zinc" } as const;
 const tierTone = { scholarly: "blue", reference: "green", popular: "zinc" } as const;
 
-export function ResearchStage({ payload, send, pending }: StageProps<ResearchPayload>) {
+export function ResearchStage({ view, payload, send, pending, options }: StageProps<ResearchPayload>) {
   const { fact_sheet: sheet, eligibility } = payload;
   const [feedback, setFeedback] = useState("");
   const [topic, setTopic] = useState("");
+  const currentLength = view.state.target_seconds ?? options?.defaults.target_seconds ?? 30;
+  const [length, setLength] = useState<number | null>(null);
+  const lengthEdit = length && length !== currentLength ? { target_seconds: length } : {};
   const sources = new Map(sheet.sources.map((source) => [source.id, source]));
   const counts = { verified: 0, disputed: 0, legend: 0 };
   for (const fact of sheet.facts) counts[fact.status] += 1;
@@ -22,6 +26,27 @@ export function ResearchStage({ payload, send, pending }: StageProps<ResearchPay
       {!eligibility.ok && (
         <Card className="border-danger/30 bg-danger/10 text-sm text-danger">{eligibility.reason}</Card>
       )}
+
+      <Card className="grid gap-6 md:grid-cols-2">
+        {options && (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-faint">Video length</p>
+            <LengthPicker options={options} value={length ?? currentLength} onChange={setLength} />
+            <p className="mt-2 text-xs text-faint">Last chance to change it: the story is written for this length.</p>
+          </div>
+        )}
+        <label className="block text-sm">
+          <span className="text-xs font-semibold uppercase tracking-wider text-faint">
+            Research a different figure instead (optional)
+          </span>
+          <input
+            value={topic}
+            onChange={(event) => setTopic(event.target.value)}
+            placeholder="e.g. Catherine the Great"
+            className={`mt-2 max-w-md ${inputClass}`}
+          />
+        </label>
+      </Card>
 
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -110,20 +135,6 @@ export function ResearchStage({ payload, send, pending }: StageProps<ResearchPay
         </ul>
       </Card>
 
-      <Card>
-        <label className="block text-sm">
-          <span className="text-xs font-semibold uppercase tracking-wider text-faint">
-            Research a different figure instead (optional)
-          </span>
-          <input
-            value={topic}
-            onChange={(event) => setTopic(event.target.value)}
-            placeholder="e.g. Catherine the Great"
-            className={`mt-2 max-w-md ${inputClass}`}
-          />
-        </label>
-      </Card>
-
       <ActionBar summary={`${sheet.facts.length} facts from ${sheet.sources.length} sources`}>
         <DirectionInput
           value={feedback}
@@ -137,7 +148,7 @@ export function ResearchStage({ payload, send, pending }: StageProps<ResearchPay
             send({
               action: "revise",
               feedback: feedback || undefined,
-              edits: topic.trim() ? { topic: topic.trim() } : {},
+              edits: { ...(topic.trim() ? { topic: topic.trim() } : {}), ...lengthEdit },
             })
           }
         >
@@ -147,7 +158,7 @@ export function ResearchStage({ payload, send, pending }: StageProps<ResearchPay
         <Button
           variant={eligibility.ok ? "primary" : "danger"}
           disabled={pending}
-          onClick={() => send({ action: "approve", feedback: feedback || undefined })}
+          onClick={() => send({ action: "approve", feedback: feedback || undefined, edits: lengthEdit })}
         >
           {eligibility.ok ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
           {eligibility.ok ? "Approve research" : "Close as ineligible"}

@@ -17,12 +17,12 @@ export const STAGE_INFO: Record<Stage, StageInfo> = {
   angle: {
     key: "angle", label: "Angle", paid: false,
     title: "Choose a story angle",
-    helper: "Pick the one story this short will tell.",
+    helper: "Pick the one story this video will tell.",
   },
   script: {
     key: "script", label: "Script", paid: false,
     title: "Edit the narration",
-    helper: "About 75 words, read in roughly 30 seconds. Edit any line directly.",
+    helper: "Timed at about 155 words per minute. Edit any line directly.",
   },
   audio: {
     key: "audio", label: "Audio", paid: true,

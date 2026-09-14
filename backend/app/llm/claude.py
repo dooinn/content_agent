@@ -17,6 +17,7 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 FALLBACK_MODELS = {"claude-opus-5", "claude-fable-5-1"}
 WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 10}
 MAX_CONTINUATIONS = 5
+MAX_OUTPUT_TOKENS = 32000
 
 
 class ClaudeRefusal(RuntimeError):
@@ -76,16 +77,21 @@ class Claude:
             for data in images or []
         ]
         content.append({"type": "text", "text": prompt})
-        response = await self.client.beta.messages.parse(
+        # Streamed so long outputs (scene sets for 3-minute videos) are not cut by the
+        # non-streaming request timeout.
+        async with self.client.beta.messages.stream(
             model=self.model,
-            max_tokens=16000,
+            max_tokens=MAX_OUTPUT_TOKENS,
             system=system,
             messages=[{"role": "user", "content": content}],
             output_format=schema,
             output_config={"effort": effort},
             **self._fallbacks(),
-        )
+        ) as stream:
+            response = await stream.get_final_message()
         _raise_on_refusal(response)
+        if response.stop_reason == "max_tokens":
+            raise RuntimeError(f"{schema.__name__} output hit the {MAX_OUTPUT_TOKENS}-token limit")
         if response.parsed_output is None:
             raise RuntimeError(f"no structured output (stop_reason={response.stop_reason})")
         return response.parsed_output

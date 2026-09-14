@@ -223,8 +223,9 @@ async def test_full_flow_through_every_gate(setup):
     statuses = {f["id"]: f["status"] for f in pending["payload"]["fact_sheet"]["facts"]}
     assert statuses == {"F1": "disputed", "F2": "verified", "F3": "disputed"}
 
-    # Feedback on an approval steers the next stage.
-    decision = {"action": "approve", "feedback": "Focus on the hunt"}
+    # Feedback on an approval steers the next stage; the length can change before the story.
+    decision = {"action": "approve", "feedback": "Focus on the hunt",
+                "edits": {"target_seconds": 60}}
     snap, pending = await step(graph, Command(resume=decision))
     assert pending["stage"] == "angle" and len(pending["payload"]["angles"]) == 2
     first_angles, rewrite = claude.prompts["AngleOptions"]
@@ -237,6 +238,10 @@ async def test_full_flow_through_every_gate(setup):
     assert snap.values["selected_angle"]["title"] == "Other"
     assert pending["stage"] == "script" and pending["payload"]["fact_check"]["passed"]
     assert "producer_direction" not in claude.prompts["Script"][0]
+    script_prompt = claude.prompts["Script"][0]
+    assert "1-minute" in script_prompt and "140 to 155 words" in script_prompt
+    assert "fill 1 min" in claude.prompts["AngleOptions"][0]
+    assert pending["payload"]["target_seconds"] == 60
     script = Script.model_validate(snap.values["script"])
     assert pending["payload"]["word_count"] == script.word_count
 

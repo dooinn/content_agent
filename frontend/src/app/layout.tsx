@@ -22,7 +22,7 @@ const playfair = Playfair_Display({ variable: "--font-cap-playfair", subsets: ["
 
 export const metadata: Metadata = {
   title: "History Shorts Agent",
-  description: "Review every stage of an AI-produced 30-second history short.",
+  description: "Review every stage of an AI-produced vertical history video, from 30 seconds to 3 minutes.",
 };
 
 const fontVariables = [geistSans, geistMono, montserrat, inter, bebas, cinzel, playfair]

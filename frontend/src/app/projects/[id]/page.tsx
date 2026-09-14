@@ -9,6 +9,7 @@ import { StagePanel, WorkingNote } from "@/components/StagePanel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button, Card, ErrorNote } from "@/components/ui";
 import { decide, errorMessage, retryProject } from "@/lib/api";
+import { lengthLabel } from "@/lib/format";
 import { STAGE_INFO } from "@/lib/stages";
 import type { Decision, Stage } from "@/lib/types";
 import { useOptions } from "@/lib/useOptions";
@@ -66,7 +67,8 @@ export default function ProjectPage({ params }: PageProps<"/projects/[id]">) {
       <div className="mt-2">
         <StatusBadge status={project.status} />
       </div>
-      <p className="mt-2 font-mono text-[11px] text-faint">{project.id}</p>
+      <p className="mt-2 text-xs text-dim">Length: {lengthLabel(view.state.target_seconds)}</p>
+      <p className="mt-1 font-mono text-[11px] text-faint">{project.id}</p>
       <div className="mt-6">
         <PipelineStepper stage={stage} status={project.status} running={busy} />
       </div>

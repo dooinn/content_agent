@@ -57,6 +57,7 @@ export interface NewProject {
   topic: string;
   styleRefKey?: string;
   voiceId?: string;
+  targetSeconds?: number;
   imageModel?: string;
   imageQuality?: string;
   videoModel?: string;
@@ -70,6 +71,7 @@ export function createProject(input: NewProject) {
       topic: input.topic,
       style_ref_key: input.styleRefKey ?? null,
       voice_id: input.voiceId ?? null,
+      target_seconds: input.targetSeconds ?? null,
       image_model: input.imageModel ?? null,
       image_quality: input.imageQuality ?? null,
       video_model: input.videoModel ?? null,

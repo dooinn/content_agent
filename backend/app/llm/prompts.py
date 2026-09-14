@@ -3,8 +3,13 @@
 import json
 from typing import Any
 
-SYSTEM = """You are the writers' room behind a channel of 30-second vertical history shorts. \
-Each short tells one surprising, true story about a historical figure.
+from app.domain.length import PROFILES, WORDS_PER_MINUTE, LengthProfile
+
+SHORT = PROFILES[30]
+
+SYSTEM = """You are the writers' room behind a channel of vertical history videos, from \
+30-second shorts to 3-minute stories. Each video tells one surprising, true story about a \
+historical figure.
 
 Standards:
 - Accuracy first. Never present a legend or a disputed claim as settled fact.
@@ -44,8 +49,9 @@ def _guidance(
 # ---------------------------------------------------------------- research
 
 
-def research(topic: str, feedback: str | None) -> str:
-    return f"""Research this historical figure: {topic}
+def research(topic: str, feedback: str | None, length: LengthProfile = SHORT) -> str:
+    low, high = length.facts
+    return f"""Research this historical figure for {length.adjective} video: {topic}
 
 Use web search. Prefer peer-reviewed and academic work, major encyclopedias, museums, archives, \
 and official heritage sites. Use blogs, listicles, Q&A sites, and social media only as leads to \
@@ -53,7 +59,7 @@ confirm elsewhere.
 
 Collect:
 1. Basics: full name, birth and death dates, era, region, and a two-sentence biography.
-2. Eight to twelve surprising, lesser-known, story-worthy episodes or facts. For each, judge \
+2. {low} to {high} surprising, lesser-known, story-worthy episodes or facts. For each, judge \
 whether it is well documented, disputed, or legend, and note competing accounts.
 3. Appearance: what contemporary portraits and descriptions say about how they looked, \
 including at different ages.
@@ -107,12 +113,18 @@ rewrite."""
 
 
 def angles(
-    sheet: dict, feedback: str | None, previous: Any, review: dict | None = None
+    sheet: dict,
+    feedback: str | None,
+    previous: Any,
+    review: dict | None = None,
+    length: LengthProfile = SHORT,
 ) -> str:
-    return f"""Propose three distinct story angles for a 30-second short about {sheet["figure"]}.
+    return f"""Propose three distinct story angles for {length.adjective} video about \
+{sheet["figure"]}.
 
 A strong angle:
-- Is one story with one emotional turn, not a mini-biography.
+- Has this shape: {length.structure}
+- Draws on enough fact-sheet material to fill {length.label} without padding or repetition.
 - Opens with a hook line of at most 12 words that makes a scrolling viewer stop. \
 Never open with "Did you know".
 - Uses only claims found in the fact sheet, and rests on verified facts. Disputed material is \
@@ -125,21 +137,36 @@ Make the three angles differ in tone, for example ironic, dramatic, and human.
 
 
 def script(
-    sheet: dict, angle: dict, feedback: str | None, previous: Any, review: dict | None = None
+    sheet: dict,
+    angle: dict,
+    feedback: str | None,
+    previous: Any,
+    review: dict | None = None,
+    length: LengthProfile = SHORT,
 ) -> str:
-    return f"""Write the narration for a 30-second vertical short.
+    words, segments, segment_words = length.words, length.segments, length.segment_words
+    scene_low, scene_high = length.scene_seconds
+    if length.seconds <= 30:
+        pacing = "A beat may span two segments."
+    else:
+        pacing = (
+            "A beat may span several segments. Spend most of them on setup and twist, where "
+            "every segment adds a new detail or complication; never repeat a point."
+        )
+    return f"""Write the narration for {length.adjective} vertical video.
 
 {_tag("angle", angle)}
 
 {_tag("fact_sheet", sheet)}
 
 Requirements:
-- 70 to 80 words in total. It will be read at about 155 words per minute.
-- 5 to 7 segments. Each segment becomes one on-screen scene of 3 to 6 seconds, so keep each \
-to 8-16 words.
+- {words[0]} to {words[1]} words in total. It will be read at about {WORDS_PER_MINUTE} words \
+per minute.
+- Story shape: {length.structure}
+- {segments[0]} to {segments[1]} segments. Each segment becomes one on-screen scene of about \
+{scene_low} to {scene_high} seconds, so keep each to {segment_words[0]}-{segment_words[1]} words.
 - Beats in order: hook (first segment, at most 12 words, starts mid-action or with a startling \
-claim), setup, twist, payoff, closer (lands the irony or meaning; no call to action). A beat may \
-span two segments.
+claim), setup, twist, payoff, closer (lands the irony or meaning; no call to action). {pacing}
 - Spoken English: short sentences, active voice, concrete images. Write numbers and dates the \
 way a narrator would say them.
 - Use only claims found in the fact sheet. List the fact ids each segment relies on. Frame \

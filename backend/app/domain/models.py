@@ -84,7 +84,7 @@ class AngleOptions(BaseModel):
 
 class ScriptSegment(BaseModel):
     beat: Beat
-    narration: str = Field(description="Spoken text for one scene, 8-16 words.")
+    narration: str = Field(description="Spoken text for one scene.")
     fact_ids: list[str]
 
 

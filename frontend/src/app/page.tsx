@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type DragEvent, type FormEvent, useEffect, useState } from "react";
 import { HomeShell } from "@/components/AppShell";
 import { CaptionStyleEditor } from "@/components/CaptionStyleEditor";
+import { LengthPicker } from "@/components/LengthPicker";
 import { ModelPicker, QualityPicker } from "@/components/ModelPicker";
 import { StageProgress } from "@/components/PipelineStepper";
 import { StatusBadge, stageLabel } from "@/components/StatusBadge";
@@ -15,7 +16,7 @@ import type { CaptionStyle, ProjectSummary } from "@/lib/types";
 import { useOptions } from "@/lib/useOptions";
 
 const STEPS = [
-  { title: "Research and story", text: "Sourced facts, a story angle, and a 30-second script." },
+  { title: "Research and story", text: "Sourced facts, a story angle, and a script timed to your length." },
   { title: "Look and keyframes", text: "A visual bible, scene plans, and a keyframe per scene." },
   { title: "Video and final cut", text: "Animatic, video clips, captions, and music." },
 ];
@@ -33,6 +34,7 @@ export default function Home() {
   const [stylePreview, setStylePreview] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [voiceId, setVoiceId] = useState("");
+  const [targetSeconds, setTargetSeconds] = useState<number | null>(null);
   const [imageModel, setImageModel] = useState<string | null>(null);
   const [imageQuality, setImageQuality] = useState<string | null>(null);
   const [videoModel, setVideoModel] = useState<string | null>(null);
@@ -89,6 +91,7 @@ export default function Home() {
         topic: topic.trim(),
         styleRefKey: styleKey,
         voiceId: voiceId.trim() || undefined,
+        targetSeconds: targetSeconds ?? undefined,
         imageModel: imageModel ?? undefined,
         imageQuality: imageQuality ?? undefined,
         videoModel: videoModel ?? undefined,
@@ -123,7 +126,8 @@ export default function Home() {
                 Start a new short
               </p>
               <p className="mt-1.5 text-sm leading-relaxed text-dim">
-                A 30-second vertical history video. You review and approve every step.
+                A vertical history video from 30 seconds to 3 minutes. You review and approve every
+                step.
               </p>
             </div>
 
@@ -143,6 +147,16 @@ export default function Home() {
                   />
                 </span>
               </label>
+              {options && (
+                <div>
+                  <p className="mb-2 text-sm font-medium">Length</p>
+                  <LengthPicker
+                    options={options}
+                    value={targetSeconds ?? options.defaults.target_seconds}
+                    onChange={setTargetSeconds}
+                  />
+                </div>
+              )}
               <Button type="submit" className="w-full py-2.5" disabled={creating || topic.trim().length < 2}>
                 {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 {creating ? "Starting research…" : "Start research"}
