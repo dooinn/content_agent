@@ -101,6 +101,8 @@ npm run dev                            # http://localhost:3000
 
 The console proxies `/api/*` and `/files/*` to the API (`BACKEND_URL`, default `http://127.0.0.1:8000`), so the backend needs no CORS setup.
 
+[backend/README.md](backend/README.md) documents the backend layout: what each module does, how they depend on each other, the graph's nodes and gates, the state channels, and where to change things.
+
 ## Deploy
 
 `deploy/deploy.sh` builds both images with Cloud Build and rolls out one Cloud Run service: the Next.js console takes all traffic and the FastAPI agent runs beside it as a sidecar, so the API has no public endpoint. Identity-Aware Proxy admits only granted Google accounts. The service scales to zero with at most one instance, because projects run as in-process background tasks and can resume from their Postgres checkpoint. See [deploy/README.md](deploy/README.md) for the one-time setup.
